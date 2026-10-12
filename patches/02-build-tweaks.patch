@@ -1,0 +1,79 @@
+--- pristine/ksystemstats-v6.6.6/CMakeLists.txt	2026-07-07 18:40:01.000000000 +0800
++++ ksystemstats-v6.6.6/CMakeLists.txt	2026-10-12 23:11:36.305332908 +0800
+@@ -6,7 +6,7 @@
+ set(PROJECT_VERSION "6.6.6")
+ project(ksystemstats VERSION ${PROJECT_VERSION})
+ 
+-set(PROJECT_DEP_VERSION "6.6.6")
++set(PROJECT_DEP_VERSION "6.6.5")
+ set(QT_MIN_VERSION "6.10.0")
+ set(KF6_MIN_VERSION "6.22.0")
+ set(KDE_COMPILERSETTINGS_LEVEL "5.82")
+@@ -29,7 +29,7 @@
+ include(ECMSetupVersion)
+ 
+ find_package(Qt6 ${QT_MIN_VERSION} CONFIG REQUIRED COMPONENTS Core Test)
+-find_package(KF6 ${KF6_MIN_VERSION} REQUIRED COMPONENTS CoreAddons Solid KIO Crash)
++find_package(KF6 ${KF6_MIN_VERSION} REQUIRED COMPONENTS CoreAddons I18n)
+ find_package(KSysGuard ${PROJECT_DEP_VERSION} REQUIRED)
+ 
+ find_package(KF6NetworkManagerQt ${KF6_MIN_VERSION})
+@@ -54,19 +54,7 @@
+ set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
+ 
+ if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+-    find_package(Sensors)
+-    set_package_properties(Sensors PROPERTIES
+-            TYPE REQUIRED
+-            PURPOSE "Used for reading hardware sensors that aren't covered by other plugins."
+-            URL "https://github.com/lm-sensors/lm-sensors"
+-        )
+-
+-    find_package(NL)
+-    set_package_properties(NL PROPERTIES
+-        TYPE REQUIRED
+-        PURPOSE "Used for gathering socket info via the sock_diag netlink subsystem and for the network plugin when NetworkManagerQt is not available."
+-        URL "https://github.com/thom311/libnl/"
+-    )
++    # 本次只构建 GPU 插件，lmsensors/network 插件的依赖不需要
+     find_package(Libcap)
+     set_package_properties(Libcap PROPERTIES
+         TYPE OPTIONAL
+@@ -91,13 +79,7 @@
+ 
+ include_directories(${CMAKE_CURRENT_BINARY_DIR})
+ 
+-add_subdirectory(src)
+ add_subdirectory(plugins)
+-add_subdirectory(tools/kstatsviewer)
+-
+-if (BUILD_TESTING)
+-    add_subdirectory(autotests)
+-endif()
+ 
+ # add clang-format target for all our real source files
+ file(GLOB_RECURSE ALL_CLANG_FORMAT_SOURCE_FILES *.cpp *.h)
+--- pristine/ksystemstats-v6.6.6/plugins/CMakeLists.txt	2026-07-07 18:40:01.000000000 +0800
++++ ksystemstats-v6.6.6/plugins/CMakeLists.txt	2026-10-12 23:07:21.575303673 +0800
+@@ -5,21 +5,6 @@
+ 
+ set(KSYSTEMSTATS_PLUGIN_INSTALL_DIR ${KDE_INSTALL_PLUGINDIR}/ksystemstats)
+ 
+-add_subdirectory(osinfo)
+-add_subdirectory(network)
+-add_subdirectory(power)
+-add_subdirectory(disks)
+-add_subdirectory(cpu)
+-add_subdirectory(memory)
+-
+-if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+-    add_subdirectory(pressure)
+-endif ()
+-
+ if(UDev_FOUND OR Devinfo_FOUND)
+     add_subdirectory(gpu)
+ endif()
+-
+-if(SENSORS_FOUND)
+-    add_subdirectory(lmsensors)
+-endif()

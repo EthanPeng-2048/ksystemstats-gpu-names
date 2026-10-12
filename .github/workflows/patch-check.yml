@@ -1,0 +1,29 @@
+name: patch-check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  applies-to-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 脚本语法检查
+        run: bash -n install.sh uninstall.sh
+
+      - name: 下载上游 ksystemstats 6.6.6 源码
+        run: |
+          curl -fSL -o src.tar.gz \
+            https://invent.kde.org/plasma/ksystemstats/-/archive/v6.6.6/ksystemstats-v6.6.6.tar.gz
+          tar xzf src.tar.gz
+
+      - name: 补丁是否仍可干净应用
+        run: |
+          cd ksystemstats-v6.6.6
+          for p in ../patches/*.patch; do
+            echo "== $(basename "$p")"
+            patch -p1 --dry-run < "$p"
+          done

@@ -1,0 +1,107 @@
+--- pristine/ksystemstats-v6.6.6/plugins/gpu/LinuxBackend.cpp	2026-07-07 18:40:01.000000000 +0800
++++ ksystemstats-v6.6.6/plugins/gpu/LinuxBackend.cpp	2026-10-12 23:13:38.057302804 +0800
+@@ -8,6 +8,8 @@
+ 
+ #include <KLocalizedString>
+ 
++#include <algorithm>
++
+ #include <libudev.h>
+ 
+ #include "LinuxAmdGpu.h"
+@@ -19,6 +21,28 @@
+ static const char *amdVendor = "0x1002";
+ static const char *intelVendor = "0x8086";
+ static const char *nvidiaVendor = "0x10de";
++// PCI Device class strings
++static const char *VGAController = "0x030000";
++static const char *threeDController = "0x030200";
++static const char *displayController = "0x038000";
++
++// 回移上游 commit 62f949813a（6.7.0）：设备型号名从 udev 数据库读
++// （systemd 的 pci hwdb 提供 ID_MODEL_FROM_DATABASE），读不到才回退 "GPU n"。
++// 上游把这段放进 KSysGuard::gpuName()，这里原地实现，避免连带升级 libksysguard。
++static QString gpuModelName(udev_device *pciDevice, int gpuNumber)
++{
++    if (pciDevice) {
++        const char *model = udev_device_get_property_value(pciDevice, "ID_MODEL_FROM_DATABASE");
++        if (model && *model) {
++            return QString::fromLocal8Bit(model);
++        }
++        const char *vendor = udev_device_get_property_value(pciDevice, "ID_VENDOR_FROM_DATABASE");
++        if (vendor && *vendor) {
++            return i18nc("@title %1 is vendor name", "%1 GPU", QString::fromLocal8Bit(vendor));
++        }
++    }
++    return i18nc("@title %1 is GPU number", "GPU %1", gpuNumber + 1);
++}
+ 
+ LinuxBackend::LinuxBackend(QObject *parent)
+     : GpuBackend(parent)
+@@ -33,25 +57,30 @@
+ 
+     auto enumerate = udev_enumerate_new(m_udev);
+ 
+-    udev_enumerate_add_match_property(enumerate, "DEVTYPE", "drm_minor");
+-    udev_enumerate_add_match_subsystem(enumerate, "drm");
++    udev_enumerate_add_match_subsystem(enumerate, "pci");
++    udev_enumerate_add_match_sysattr(enumerate, "class", VGAController);
++    udev_enumerate_add_match_sysattr(enumerate, "class", threeDController);
++    udev_enumerate_add_match_sysattr(enumerate, "class", displayController);
+     udev_enumerate_scan_devices(enumerate);
+ 
+     auto devices = udev_enumerate_get_list_entry(enumerate);
++
++    // udev 的枚举顺序既不是按 PCI 地址、也不保证跨重启一致，
++    // 这里显式排序：gpu0/gpu1 永远对应固定的 PCI 地址。
++    QList<QByteArray> devicePaths;
+     for (auto entry = devices; entry; entry = udev_list_entry_get_next(entry)) {
+-        auto path = udev_list_entry_get_name(entry);
+-        auto drmDevice = udev_device_new_from_syspath(m_udev, path);
+-        auto pciDevice = udev_device_get_parent(drmDevice);
++        devicePaths.append(udev_list_entry_get_name(entry));
++    }
++    std::sort(devicePaths.begin(), devicePaths.end());
+ 
+-        if (strstr(udev_device_get_sysname(drmDevice), "render") != NULL) {
+-            udev_device_unref(drmDevice);
+-            continue;
+-        }
++    int gpuNumber = 0;
++    for (const QByteArray &path : devicePaths) {
++        auto pciDevice = udev_device_new_from_syspath(m_udev, path.constData());
+ 
+         auto vendor = QByteArray(udev_device_get_sysattr_value(pciDevice, "vendor"));
+-        auto drmNumber = std::atoi(udev_device_get_sysnum(drmDevice));
+-        auto gpuId = QStringLiteral("gpu%1").arg(drmNumber);
+-        auto gpuName = i18nc("@title %1 is GPU number", "GPU %1", drmNumber + 1);
++        auto gpuId = QStringLiteral("gpu%1").arg(gpuNumber);
++
++        QString gpuName = gpuModelName(pciDevice, gpuNumber);
+ 
+         GpuDevice *gpu = nullptr;
+         if (vendor == amdVendor) {
+@@ -60,17 +89,20 @@
+             gpu = new LinuxNvidiaGpu{gpuId, gpuName, pciDevice};
+         } else if (vendor == intelVendor) {
+             gpu = new LinuxIntelGpu{gpuId, gpuName, pciDevice};
+-        } else {
++        }
++
++        if (!gpu) {
+             qCDebug(KSYSTEMSTATS_GPU) << "Found unsupported GPU:" << path;
+-            udev_device_unref(drmDevice);
++            udev_device_unref(pciDevice);
+             continue;
+         }
+ 
+         gpu->initialize();
+         m_devices.append(gpu);
+         Q_EMIT deviceAdded(gpu);
++        gpuNumber++;
+ 
+-        udev_device_unref(drmDevice);
++        udev_device_unref(pciDevice);
+     }
+ 
+     udev_enumerate_unref(enumerate);
